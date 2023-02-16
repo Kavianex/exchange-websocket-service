@@ -1,64 +1,28 @@
+from __future__ import absolute_import, unicode_literals
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from kafka.consumer import start_consumer
+import threading
 from internal import enums
+from uuid import uuid4
 from collections import defaultdict
+from celery_config.celery_app import app as celery_app
+# from celery import app as celery_app
+import time
 import uvicorn
 import settings
 import json
+import logging
+from connections import ConnectionManager as manager
+
+logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI()
 
-class ConnectionManager:
-    subscriptions: dict[str, list[WebSocket]] = defaultdict(lambda: [])
 
-    async def connect(self, account_id:str, websocket: WebSocket):
-        websocket.account_id = account_id
-        websocket.channels = []
-        await websocket.accept()
-        ConnectionManager.subscriptions[account_id].append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        ConnectionManager.subscriptions[websocket.account_id].remove(websocket)
-        if not ConnectionManager.subscriptions[websocket.account_id]:
-            del ConnectionManager.subscriptions[websocket.account_id]
-
-    async def subscribe(self, channel:str, websocket: WebSocket):
-        print("new subscriptions")
-        if channel not in websocket.channels:
-            msg = f"{channel} subscribed"
-            print("subsed")
-            websocket.channels.append(channel)
-            ConnectionManager.subscriptions[channel].append(websocket)
-        else:
-            msg = f"{channel} already subscribed"
-        await self.send_message(msg, websocket)
-
-    async def unsubscribe(self, channel:str, websocket: WebSocket):
-        msg = f"{channel} unsubscribed"
-        if channel in websocket.channels:
-            websocket.channels.remove(channel)
-        ConnectionManager.subscriptions[channel].remove(websocket)
-        if not ConnectionManager.subscriptions[channel]:
-            del ConnectionManager.subscriptions[channel]
-        await self.send_message(msg, websocket)
-
-    async def publish(self, subscription_key: str="", message: str=""):
-        print(ConnectionManager.subscriptions[subscription_key])
-        for websocket in ConnectionManager.subscriptions[subscription_key]:
-            await self.send_message(message=message, websocket=websocket)
-
-    async def send_message(self, message: str, websocket: WebSocket):
-        await websocket.send_text(message)
-
-    # async def broadcast(self, message: str):
-    #     for _, connections in ConnectionManager.active_connections.items():
-    #         for connection in connections:
-    #             await connection.send_text(message)
-
-manager = ConnectionManager()
+# manager = ConnectionManager()
 
 @app.websocket("/ws/{account_id}")
 async def websocket_endpoint(websocket: WebSocket, account_id: str):
+    # logger.warning(f"connect {manager.tid}")
     await manager.connect(account_id, websocket)
     try:
         while True:
@@ -68,8 +32,12 @@ async def websocket_endpoint(websocket: WebSocket, account_id: str):
                 if params['method'] == "SUBSCRIBE":
                     for channel in params['channels']:
                         await manager.subscribe(channel, websocket)
+            except WebSocketDisconnect:
+                logger.warning("disconnect")
+                manager.disconnect(websocket)
+                break
             except Exception as e:
-                print(e)
+                logger.warning(e)
                 await manager.send_message(
                     json.dumps({
                         "event": "ERROR",
@@ -78,16 +46,34 @@ async def websocket_endpoint(websocket: WebSocket, account_id: str):
                     websocket
                     )
     except WebSocketDisconnect:
-        print("disconnect")
+        # print("disconnect")
+        logger.error(e)
         manager.disconnect(websocket)
+    except Exception as e:
+        # print("disconnect")
+        logger.error(e)
 
 @app.get("/")
 async def root():
-    return {"message": "OK!"}
+    return {"message": "Websocket service is runing."}
+
+def f():
+    while True:
+        time.sleep(20)
+        logger.warning(f"f {manager.connections}")
 
 @app.on_event("startup")
 async def startup():
-    start_consumer(manager.publish)
-
+    # argv=['worker', '-l', 'info', '-c', '1']
+    argv=['worker', '-l', 'info', '-c', '1', '-n', 'websocket', '--pool', 'threads']
+    workers_thread = threading.Thread(
+        target=celery_app.worker_main, 
+        kwargs={"argv": argv},
+        # daemon=True,
+    )
+    workers_thread.start()
+    # threading.Thread(target=f).start()
+    
 if __name__ == "__main__":
+    logger.warning(f"starting server {manager.tid}")
     uvicorn.run("main:app", host="0.0.0.0", port=settings.SERVICE_PORT)
