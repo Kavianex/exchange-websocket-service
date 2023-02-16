@@ -6,8 +6,8 @@ services:
     image: websocket
     command: python app/main.py
     build: .
-    environment:
-      - SERVICE_PORT=80
+    env_file:
+      - .env
 networks:
   default:
     external: true
