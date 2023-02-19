@@ -4,9 +4,7 @@ import threading
 from internal import enums
 from uuid import uuid4
 from collections import defaultdict
-from celery_config.celery_app import app as celery_app
-# from celery import app as celery_app
-import time
+from kafka.consumer import start_consumer
 import uvicorn
 import settings
 import json
@@ -57,22 +55,14 @@ async def websocket_endpoint(websocket: WebSocket, account_id: str):
 async def root():
     return {"message": "Websocket service is runing."}
 
-def f():
-    while True:
-        time.sleep(20)
-        logger.warning(f"f {manager.connections}")
+# def f():
+#     while True:
+#         time.sleep(20)
+#         logger.warning(f"f {manager.connections}")
 
 @app.on_event("startup")
 async def startup():
-    # argv=['worker', '-l', 'info', '-c', '1']
-    argv=['worker', '-l', 'info', '-c', '1', '-n', 'websocket', '--pool', 'threads']
-    workers_thread = threading.Thread(
-        target=celery_app.worker_main, 
-        kwargs={"argv": argv},
-        # daemon=True,
-    )
-    workers_thread.start()
-    # threading.Thread(target=f).start()
+    start_consumer(manager.publish)
     
 if __name__ == "__main__":
     logger.warning(f"starting server {manager.tid}")

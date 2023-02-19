@@ -3,8 +3,6 @@ import threading
 from internal import enums
 from uuid import uuid4
 from collections import defaultdict
-from celery_config.celery_app import app as celery_app
-# from celery import app as celery_app
 import time
 import uvicorn
 import settings

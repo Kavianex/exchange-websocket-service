@@ -3,6 +3,7 @@ from internal import enums
 import traceback
 import settings
 import asyncio
+import json
 import threading
 import logging
 
@@ -13,9 +14,9 @@ async def consume(callback: callable):
     c = Consumer({
         'bootstrap.servers': settings.KAFKA_BOOTSTRAP_SERVERS,
         'group.id': 'websocket',
-        'auto.offset.reset': 'earliest'
+        'auto.offset.reset': 'latest'
     })
-    c.subscribe([enums.KafkaQueue.account.value, enums.KafkaQueue.public.value])
+    c.subscribe(["PUBLISH"])
     logger.warning("consumer connected!")
 
     while True:
@@ -31,8 +32,13 @@ async def consume(callback: callable):
         if subscription_key:
             subscription_key = subscription_key.decode('utf-8')
         msg = msg.value().decode('utf-8')
-        logger.warning(f"subscription_key: {topic} {subscription_key}, {msg} {type(msg)}\n\n")
-        await callback(subscription_key, msg, topic == "ACCOUNT")
+        # logger.warning(f"subscription_key: {topic} {subscription_key}, {msg} {type(msg)}\n\n")
+        event = json.loads(msg)
+        topic = event['topic']
+        subscription_key = event['key']
+        msg = event['event']
+        account_update = topic in enums.Topics.account.value
+        await callback(subscription_key, json.dumps({"topic": topic, "event": msg}), account_update)
     c.close()
 
 async def consumer(callback: callable):
